@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getFeed, getSource, type FeedItem } from "@/lib/db";
 import { FeedList } from "../../FeedList";
+import { FEED_PAGE_SIZE } from "../../feed-config";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function SourcePage({
   const source = getSource(id);
   if (!source) notFound();
 
-  const items: FeedItem[] = getFeed({ sourceId: id });
+  const items: FeedItem[] = getFeed({ sourceId: id, limit: FEED_PAGE_SIZE });
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
@@ -50,7 +51,7 @@ export default async function SourcePage({
         </p>
       </header>
 
-      <FeedList items={items} linkSource={false} />
+      <FeedList items={items} sourceId={id} linkSource={false} />
     </main>
   );
 }

@@ -147,8 +147,10 @@ export type FeedItem = {
 
 // The Following feed: articles from subscribed sources, newest first.
 // Pass a sourceId to restrict to a single source.
-export function getFeed(opts: { sourceId?: string; limit?: number } = {}): FeedItem[] {
-  const { sourceId = null, limit = 150 } = opts;
+export function getFeed(
+  opts: { sourceId?: string; limit?: number; offset?: number } = {}
+): FeedItem[] {
+  const { sourceId = null, limit = 150, offset = 0 } = opts;
   return db()
     .prepare(
       `SELECT a.id, a.title, a.url, a.summary, a.image_url, a.image_width, a.published_at,
@@ -162,9 +164,9 @@ export function getFeed(opts: { sourceId?: string; limit?: number } = {}): FeedI
            ON sig.article_id = a.id AND sig.user_id = @user
         WHERE (@sourceId IS NULL OR a.source_id = @sourceId)
         ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC
-        LIMIT @limit`
+        LIMIT @limit OFFSET @offset`
     )
-    .all({ user: USER_ID, sourceId, limit }) as FeedItem[];
+    .all({ user: USER_ID, sourceId, limit, offset }) as FeedItem[];
 }
 
 export type Source = {

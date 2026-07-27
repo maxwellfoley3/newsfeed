@@ -1,11 +1,13 @@
 import { getFeed, type FeedItem } from "@/lib/db";
 import { FeedList } from "./FeedList";
+import { FEED_PAGE_SIZE } from "./feed-config";
 
 // Always render fresh from the DB — this is the reader, it should reflect ingest.
 export const dynamic = "force-dynamic";
 
 export default function FollowingPage() {
-  const items: FeedItem[] = getFeed();
+  // First screen only; FeedList infinite-scrolls the rest in FEED_PAGE_SIZE batches.
+  const items: FeedItem[] = getFeed({ limit: FEED_PAGE_SIZE });
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
