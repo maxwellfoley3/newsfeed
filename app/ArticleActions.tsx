@@ -19,24 +19,23 @@ export function ArticleActions({
   }
 
   const base =
-    "text-sm px-2 py-0.5 rounded-md border transition-colors disabled:opacity-50";
+    "text-[0.8rem] font-medium px-3 py-1 rounded-full transition-colors disabled:opacity-50";
   const liked = signal === 1;
   const disliked = signal === -1;
 
   return (
-    <div className="flex items-center gap-2" style={{ fontFamily: "system-ui" }}>
+    <div className="flex items-center gap-2">
       <button
         onClick={() => vote(1)}
         disabled={pending}
         aria-pressed={liked}
         className={base}
         style={{
-          borderColor: liked ? "var(--accent)" : "var(--line)",
-          color: liked ? "var(--accent)" : "var(--muted)",
-          background: "transparent",
+          color: liked ? "#ffffff" : "var(--muted)",
+          background: liked ? "var(--accent)" : "rgba(0,0,0,0.05)",
         }}
       >
-        ▲ like
+        ▲ Like
       </button>
       <button
         onClick={() => vote(-1)}
@@ -44,12 +43,11 @@ export function ArticleActions({
         aria-pressed={disliked}
         className={base}
         style={{
-          borderColor: disliked ? "var(--accent)" : "var(--line)",
-          color: disliked ? "var(--accent)" : "var(--muted)",
-          background: "transparent",
+          color: disliked ? "#ffffff" : "var(--muted)",
+          background: disliked ? "var(--accent)" : "rgba(0,0,0,0.05)",
         }}
       >
-        ▼ less
+        ▼ Less
       </button>
     </div>
   );

@@ -1,29 +1,24 @@
 @import "tailwindcss";
 
+/* Light mode only — Apple-inspired neutral palette. */
 :root {
-  --bg: #faf9f6;
+  color-scheme: light;
+  --bg: #fbfbfd;        /* Apple's off-white page */
   --surface: #ffffff;
-  --ink: #1a1a1a;
-  --muted: #6b6b6b;
-  --line: #e7e4dd;
-  --accent: #b5462f;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16161a;
-    --surface: #1e1e24;
-    --ink: #ececec;
-    --muted: #9a9aa2;
-    --line: #2c2c34;
-    --accent: #e0765c;
-  }
+  --ink: #1d1d1f;       /* near-black text */
+  --muted: #6e6e73;     /* secondary gray */
+  --line: #d2d2d7;      /* hairline dividers */
+  --accent: #0066cc;    /* Apple link blue */
 }
 
 html,
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  /* SF Pro (Apple's system sans-serif) with graceful fallbacks. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }

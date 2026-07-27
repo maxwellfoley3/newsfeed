@@ -51,6 +51,8 @@ function migrate(d: Database.Database) {
       url          TEXT NOT NULL,
       author       TEXT,
       summary      TEXT,
+      image_url    TEXT,
+      image_width  INTEGER,
       published_at INTEGER,
       fetched_at   INTEGER NOT NULL,
       UNIQUE (source_id, guid),
@@ -69,6 +71,15 @@ function migrate(d: Database.Database) {
       FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
     );
   `);
+
+  // Backfill columns on pre-existing DBs (CREATE TABLE IF NOT EXISTS won't add them).
+  const cols = d.prepare("PRAGMA table_info(articles)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "image_url")) {
+    d.exec("ALTER TABLE articles ADD COLUMN image_url TEXT");
+  }
+  if (!cols.some((c) => c.name === "image_width")) {
+    d.exec("ALTER TABLE articles ADD COLUMN image_width INTEGER");
+  }
 }
 
 type Seed = {
@@ -125,6 +136,8 @@ export type FeedItem = {
   title: string;
   url: string;
   summary: string | null;
+  image_url: string | null;
+  image_width: number | null;
   published_at: number | null;
   source_id: string;
   source_name: string;
@@ -138,7 +151,7 @@ export function getFeed(opts: { sourceId?: string; limit?: number } = {}): FeedI
   const { sourceId = null, limit = 150 } = opts;
   return db()
     .prepare(
-      `SELECT a.id, a.title, a.url, a.summary, a.published_at,
+      `SELECT a.id, a.title, a.url, a.summary, a.image_url, a.image_width, a.published_at,
               s.id AS source_id, s.name AS source_name, s.affiliation,
               sig.value AS signal
          FROM articles a

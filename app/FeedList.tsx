@@ -2,6 +2,10 @@ import Link from "next/link";
 import type { FeedItem } from "@/lib/db";
 import { ArticleActions } from "./ArticleActions";
 
+// Only show feed images the source advertises as wider than this. Applied at
+// display time (not ingest) so the threshold can change without re-ingesting.
+const MIN_IMAGE_WIDTH = 500;
+
 function relativeTime(epoch: number | null): string {
   if (!epoch) return "";
   const diff = Math.floor(Date.now() / 1000) - epoch;
@@ -76,6 +80,7 @@ export function FeedList({
             target="_blank"
             rel="noopener noreferrer"
             className="block text-xl font-semibold leading-snug hover:underline"
+            style={{ letterSpacing: "-0.011em" }}
           >
             {a.title}
           </a>
@@ -84,6 +89,25 @@ export function FeedList({
             <p className="mt-1.5 text-[0.95rem] leading-relaxed" style={{ color: "var(--muted)" }}>
               {a.summary}
             </p>
+          )}
+
+          {a.image_url && (a.image_width ?? 0) > MIN_IMAGE_WIDTH && (
+            <a
+              href={a.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 block overflow-hidden rounded-xl border"
+              style={{ borderColor: "var(--line)" }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={a.image_url}
+                alt=""
+                loading="lazy"
+                className="aspect-[16/9] w-full object-cover"
+                style={{ background: "var(--line)" }}
+              />
+            </a>
           )}
 
           <div className="mt-3 flex items-center justify-between">

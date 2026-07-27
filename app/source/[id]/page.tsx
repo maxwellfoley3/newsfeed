@@ -26,10 +26,12 @@ export default async function SourcePage({
         >
           ← Following
         </Link>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight">{source.name}</h1>
+        <h1 className="mt-2 text-4xl font-semibold" style={{ letterSpacing: "-0.021em" }}>
+          {source.name}
+        </h1>
         <p
-          className="mt-1 flex flex-wrap items-center gap-2 text-sm"
-          style={{ color: "var(--muted)", fontFamily: "system-ui" }}
+          className="mt-1.5 flex flex-wrap items-center gap-2 text-sm"
+          style={{ color: "var(--muted)" }}
         >
           {source.affiliation && <span>{source.affiliation}</span>}
           {source.homepage && (
