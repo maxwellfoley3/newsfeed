@@ -20,6 +20,7 @@ export function db(): Database.Database {
   database.pragma("foreign_keys = ON");
   migrate(database);
   seedSources(database);
+  seedCatalog(database);
   _db = database;
   return _db;
 }
@@ -70,6 +71,30 @@ function migrate(d: Database.Database) {
       PRIMARY KEY (user_id, article_id),
       FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
     );
+
+    -- Small key/value store (e.g. which catalog version has been seeded).
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    -- The discovery pool the For You page draws from. Kept SEPARATE from the
+    -- sources table on purpose: ingest only polls sources, so the thousands of
+    -- catalog feeds are never fetched until someone follows one (which copies
+    -- the row into sources). sort_key gives a stable shuffled browse order.
+    CREATE TABLE IF NOT EXISTS catalog (
+      id          TEXT PRIMARY KEY,
+      title       TEXT NOT NULL,
+      url         TEXT NOT NULL,
+      homepage    TEXT,
+      category    TEXT,
+      description TEXT,
+      provenance  TEXT,
+      sort_key    REAL NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_catalog_sortkey ON catalog(sort_key);
+    CREATE INDEX IF NOT EXISTS idx_catalog_url ON catalog(url);
   `);
 
   // Backfill columns on pre-existing DBs (CREATE TABLE IF NOT EXISTS won't add them).
@@ -125,6 +150,63 @@ function seedSources(d: Database.Database) {
       });
       if (s.follow_by_default) subscribe.run(USER_ID, s.id);
     }
+  });
+  tx();
+}
+
+type Catalog = {
+  generated_at: string;
+  feeds: Array<{
+    id: string;
+    title: string;
+    url: string;
+    homepage: string | null;
+    category: string;
+    description: string | null;
+    provenance: string;
+    sort_key: number;
+  }>;
+};
+
+// Idempotent: load data/catalog.json into the `catalog` table. Guarded by the
+// file's generated_at stamp so it only re-imports when the catalog changes.
+function seedCatalog(d: Database.Database) {
+  const catalogPath = path.join(process.cwd(), "data", "catalog.json");
+  if (!fs.existsSync(catalogPath)) return;
+  const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as Catalog;
+
+  const STAMP = "catalog_generated_at";
+  const current = d.prepare("SELECT value FROM meta WHERE key = ?").get(STAMP) as
+    | { value: string }
+    | undefined;
+  if (current?.value === catalog.generated_at) return;
+
+  const upsert = d.prepare(`
+    INSERT INTO catalog (id, title, url, homepage, category, description, provenance, sort_key)
+    VALUES (@id, @title, @url, @homepage, @category, @description, @provenance, @sort_key)
+    ON CONFLICT(id) DO UPDATE SET
+      title=excluded.title, url=excluded.url, homepage=excluded.homepage,
+      category=excluded.category, description=excluded.description,
+      provenance=excluded.provenance, sort_key=excluded.sort_key
+  `);
+  const setMeta = d.prepare(
+    "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  );
+
+  const tx = d.transaction(() => {
+    for (const f of catalog.feeds) {
+      upsert.run({
+        id: f.id,
+        title: f.title,
+        url: f.url,
+        homepage: f.homepage ?? null,
+        category: f.category ?? null,
+        description: f.description ?? null,
+        provenance: f.provenance ?? null,
+        sort_key: f.sort_key,
+      });
+    }
+    setMeta.run(STAMP, catalog.generated_at);
   });
   tx();
 }
@@ -185,6 +267,39 @@ export function getSource(id: string): Source | undefined {
     .get(id) as Source | undefined;
 }
 
+export type DiscoverFeed = {
+  id: string;
+  title: string;
+  url: string;
+  homepage: string | null;
+  category: string | null;
+  description: string | null;
+  provenance: string | null;
+  sort_key: number;
+};
+
+// The For You pool: catalog feeds the user does NOT already follow, in stable
+// shuffled order. Keyset-paginated by sort_key (pass the last row's sort_key as
+// `afterKey`) so following feeds mid-scroll never shifts or duplicates a page.
+export function getDiscoverFeeds(
+  opts: { limit?: number; afterKey?: number | null } = {}
+): DiscoverFeed[] {
+  const { limit = 15, afterKey = null } = opts;
+  return db()
+    .prepare(
+      `SELECT c.id, c.title, c.url, c.homepage, c.category, c.description, c.provenance, c.sort_key
+         FROM catalog c
+        WHERE (@afterKey IS NULL OR c.sort_key > @afterKey)
+          AND c.url NOT IN (
+                SELECT s.url FROM sources s
+                  JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = @user
+              )
+        ORDER BY c.sort_key ASC, c.id ASC
+        LIMIT @limit`
+    )
+    .all({ user: USER_ID, afterKey, limit }) as DiscoverFeed[];
+}
+
 // ---- Writes ---------------------------------------------------------------
 
 // Toggle like/dislike. Clicking the active value again clears it.
@@ -207,4 +322,58 @@ export function setSignal(articleId: number, value: 1 | -1) {
      VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id, article_id) DO UPDATE SET value = excluded.value, created_at = excluded.created_at`
   ).run(USER_ID, articleId, value, Math.floor(Date.now() / 1000));
+}
+
+// Follow a catalog feed: copy it into `sources` (so ingest will poll it) and
+// subscribe. Returns {id,name,url} so the caller can fetch it immediately.
+export function followFromCatalog(
+  catalogId: string
+): { id: string; name: string; url: string } | null {
+  const d = db();
+  const c = d
+    .prepare(
+      "SELECT id, title, url, homepage, category, provenance FROM catalog WHERE id = ?"
+    )
+    .get(catalogId) as
+    | {
+        id: string;
+        title: string;
+        url: string;
+        homepage: string | null;
+        category: string | null;
+        provenance: string | null;
+      }
+    | undefined;
+  if (!c) return null;
+
+  const tx = d.transaction(() => {
+    d.prepare(
+      `INSERT INTO sources (id, name, url, homepage, category, affiliation, note)
+       VALUES (@id, @name, @url, @homepage, @category, @affiliation, NULL)
+       ON CONFLICT(id) DO UPDATE SET
+         name=excluded.name, url=excluded.url, homepage=excluded.homepage,
+         category=excluded.category, affiliation=excluded.affiliation`
+    ).run({
+      id: c.id,
+      name: c.title,
+      url: c.url,
+      homepage: c.homepage,
+      category: c.category,
+      affiliation: c.provenance,
+    });
+    d.prepare(
+      "INSERT OR IGNORE INTO subscriptions (user_id, source_id) VALUES (?, ?)"
+    ).run(USER_ID, c.id);
+  });
+  tx();
+
+  return { id: c.id, name: c.title, url: c.url };
+}
+
+// Unfollow: drop the subscription. The source row and any fetched articles
+// stay (ingest only polls subscribed sources, so it simply stops updating).
+export function unfollowSource(sourceId: string) {
+  db()
+    .prepare("DELETE FROM subscriptions WHERE user_id = ? AND source_id = ?")
+    .run(USER_ID, sourceId);
 }

@@ -1,6 +1,7 @@
 node_modules/
 .next/
-data/
+data/*
+!data/catalog.json
 *.db
 *.db-*
 next-env.d.ts

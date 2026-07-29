@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Nav } from "./Nav";
 
 export const metadata: Metadata = {
-  title: "Following — newsfeed",
+  title: "newsfeed",
   description: "A calm, chronological RSS reader.",
 };
 
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Nav />
+        {children}
+      </body>
     </html>
   );
 }
