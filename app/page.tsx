@@ -35,7 +35,7 @@ export default function FollowingPage() {
         </Link>
       </header>
 
-      <FeedList items={items} />
+      <FeedList items={items} now={Math.floor(Date.now() / 1000)} />
     </main>
   );
 }

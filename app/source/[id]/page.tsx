@@ -51,7 +51,12 @@ export default async function SourcePage({
         </p>
       </header>
 
-      <FeedList items={items} sourceId={id} linkSource={false} />
+      <FeedList
+        items={items}
+        sourceId={id}
+        linkSource={false}
+        now={Math.floor(Date.now() / 1000)}
+      />
     </main>
   );
 }

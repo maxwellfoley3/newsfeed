@@ -12,9 +12,13 @@ import { FEED_PAGE_SIZE } from "./feed-config";
 // display time (not ingest) so the threshold can change without re-ingesting.
 const MIN_IMAGE_WIDTH = 500;
 
-function relativeTime(epoch: number | null): string {
+// `nowSec` is the reference "now" (epoch seconds). It's passed in rather than
+// read from Date.now() here so the server render and the first client render
+// agree — computing it inline would differ across the SSR/hydration gap and
+// trip React's hydration check.
+function relativeTime(epoch: number | null, nowSec: number): string {
   if (!epoch) return "";
-  const diff = Math.floor(Date.now() / 1000) - epoch;
+  const diff = nowSec - epoch;
   if (diff < 60) return "just now";
   const mins = Math.floor(diff / 60);
   if (mins < 60) return `${mins}m ago`;
@@ -44,12 +48,25 @@ export function FeedList({
   items: initialItems,
   sourceId,
   linkSource = true,
+  now,
 }: {
   items: FeedItem[];
   sourceId?: string;
   linkSource?: boolean;
+  // Request-time clock (epoch seconds) from the server. Shared by SSR and the
+  // first client render so relative timestamps hydrate cleanly.
+  now: number;
 }) {
   const [items, setItems] = useState<FeedItem[]>(initialItems);
+  // Start from the server's `now` (so the first client render matches the SSR
+  // HTML), then switch to the real client clock after mount and keep it ticking
+  // so timestamps stay accurate — including items fetched later by infinite scroll.
+  const [nowSec, setNowSec] = useState(now);
+  useEffect(() => {
+    setNowSec(Math.floor(Date.now() / 1000));
+    const id = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const [loading, setLoading] = useState(false);
   // If the first render already came up short, there's nothing more to fetch.
   const [done, setDone] = useState(initialItems.length < FEED_PAGE_SIZE);
@@ -233,7 +250,7 @@ export function FeedList({
                 </span>
               )}
               {a.affiliation && <span className="opacity-70">· {a.affiliation}</span>}
-              <span className="opacity-70">· {relativeTime(a.published_at)}</span>
+              <span className="opacity-70">· {relativeTime(a.published_at, nowSec)}</span>
             </div>
 
             <a
