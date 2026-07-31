@@ -273,6 +273,26 @@ export function getSource(id: string): Source | undefined {
     .get(id) as Source | undefined;
 }
 
+// How many sources the user currently subscribes to (the "Following N" count).
+export function getFollowedCount(): number {
+  const row = db()
+    .prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE user_id = ?")
+    .get(USER_ID) as { n: number };
+  return row.n;
+}
+
+// Every source the user follows, alphabetically. Backs the /following-list page.
+export function getFollowedSources(): Source[] {
+  return db()
+    .prepare(
+      `SELECT s.id, s.name, s.homepage, s.category, s.affiliation
+         FROM sources s
+         JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = @user
+        ORDER BY s.name COLLATE NOCASE ASC`
+    )
+    .all({ user: USER_ID }) as Source[];
+}
+
 export type DiscoverFeed = {
   id: string;
   title: string;

@@ -18,9 +18,13 @@ export function Nav() {
     >
       <div className="mx-auto flex max-w-2xl items-center gap-1 px-5">
         {TABS.map((tab) => {
-          // Following owns "/" and the single-source pages under it.
+          // Following owns "/", the single-source pages, and the followed-list page.
           const active =
-            tab.href === "/" ? pathname === "/" || pathname.startsWith("/source/") : pathname === tab.href;
+            tab.href === "/"
+              ? pathname === "/" ||
+                pathname.startsWith("/source/") ||
+                pathname === "/following-list"
+              : pathname === tab.href;
           return (
             <Link
               key={tab.href}

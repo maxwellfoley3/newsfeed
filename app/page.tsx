@@ -1,4 +1,5 @@
-import { getFeed, type FeedItem } from "@/lib/db";
+import Link from "next/link";
+import { getFeed, getFollowedCount, type FeedItem } from "@/lib/db";
 import { refreshStaleInBackground } from "@/lib/ingest";
 import { FeedList } from "./FeedList";
 import { FEED_PAGE_SIZE } from "./feed-config";
@@ -13,6 +14,7 @@ export default function FollowingPage() {
 
   // First screen only; FeedList infinite-scrolls the rest in FEED_PAGE_SIZE batches.
   const items: FeedItem[] = getFeed({ limit: FEED_PAGE_SIZE });
+  const followedCount = getFollowedCount();
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
@@ -23,6 +25,14 @@ export default function FollowingPage() {
         <p className="mt-1.5 text-sm" style={{ color: "var(--muted)" }}>
           Newest first, from the sources you follow. No algorithm.
         </p>
+        <Link
+          href="/following-list"
+          className="mt-3 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm font-medium transition-colors hover:bg-black/[0.03]"
+          style={{ borderColor: "var(--line)", color: "var(--muted)", fontFamily: "system-ui" }}
+        >
+          Following {followedCount}
+          <span aria-hidden>›</span>
+        </Link>
       </header>
 
       <FeedList items={items} />
