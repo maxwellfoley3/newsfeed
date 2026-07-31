@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getFollowedSources, type Source } from "@/lib/db";
+import { UnfollowButton } from "../UnfollowButton";
 
 export const dynamic = "force-dynamic";
 
@@ -51,29 +52,36 @@ export default function FollowingListPage() {
         <ul className="flex flex-col">
           {sources.map((s) => (
             <li key={s.id} className="border-b py-4" style={{ borderColor: "var(--line)" }}>
-              <Link
-                href={`/source/${s.id}`}
-                className="block text-lg font-semibold leading-snug hover:underline"
-                style={{ letterSpacing: "-0.011em" }}
-              >
-                {s.name}
-              </Link>
-              <div
-                className="mt-0.5 flex flex-wrap items-center gap-2 text-sm"
-                style={{ color: "var(--muted)" }}
-              >
-                {s.affiliation && <span>{s.affiliation}</span>}
-                {s.affiliation && s.homepage && <span className="opacity-50">·</span>}
-                {s.homepage && (
-                  <a
-                    href={s.homepage}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:underline"
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <Link
+                    href={`/source/${s.id}`}
+                    className="block text-lg font-semibold leading-snug hover:underline"
+                    style={{ letterSpacing: "-0.011em" }}
                   >
-                    {hostname(s.homepage)} ↗
-                  </a>
-                )}
+                    {s.name}
+                  </Link>
+                  <div
+                    className="mt-0.5 flex flex-wrap items-center gap-2 text-sm"
+                    style={{ color: "var(--muted)" }}
+                  >
+                    {s.affiliation && <span>{s.affiliation}</span>}
+                    {s.affiliation && s.homepage && <span className="opacity-50">·</span>}
+                    {s.homepage && (
+                      <a
+                        href={s.homepage}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                      >
+                        {hostname(s.homepage)} ↗
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="pt-0.5">
+                  <UnfollowButton sourceId={s.id} sourceName={s.name} />
+                </div>
               </div>
             </li>
           ))}
