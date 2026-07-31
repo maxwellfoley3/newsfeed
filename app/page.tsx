@@ -1,4 +1,5 @@
 import { getFeed, type FeedItem } from "@/lib/db";
+import { refreshStaleInBackground } from "@/lib/ingest";
 import { FeedList } from "./FeedList";
 import { FEED_PAGE_SIZE } from "./feed-config";
 
@@ -6,6 +7,10 @@ import { FEED_PAGE_SIZE } from "./feed-config";
 export const dynamic = "force-dynamic";
 
 export default function FollowingPage() {
+  // Kick a background refresh of any stale followed feeds (not awaited): this
+  // load serves what's already in SQLite; fresh rows land for the next one.
+  refreshStaleInBackground();
+
   // First screen only; FeedList infinite-scrolls the rest in FEED_PAGE_SIZE batches.
   const items: FeedItem[] = getFeed({ limit: FEED_PAGE_SIZE });
 

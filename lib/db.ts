@@ -28,13 +28,14 @@ export function db(): Database.Database {
 function migrate(d: Database.Database) {
   d.exec(`
     CREATE TABLE IF NOT EXISTS sources (
-      id          TEXT PRIMARY KEY,
-      name        TEXT NOT NULL,
-      url         TEXT NOT NULL,
-      homepage    TEXT,
-      category    TEXT,
-      affiliation TEXT,
-      note        TEXT
+      id             TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      url            TEXT NOT NULL,
+      homepage       TEXT,
+      category       TEXT,
+      affiliation    TEXT,
+      note           TEXT,
+      last_polled_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -104,6 +105,11 @@ function migrate(d: Database.Database) {
   }
   if (!cols.some((c) => c.name === "image_width")) {
     d.exec("ALTER TABLE articles ADD COLUMN image_width INTEGER");
+  }
+
+  const srcCols = d.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>;
+  if (!srcCols.some((c) => c.name === "last_polled_at")) {
+    d.exec("ALTER TABLE sources ADD COLUMN last_polled_at INTEGER");
   }
 }
 
@@ -302,26 +308,28 @@ export function getDiscoverFeeds(
 
 // ---- Writes ---------------------------------------------------------------
 
-// Toggle like/dislike. Clicking the active value again clears it.
-export function setSignal(articleId: number, value: 1 | -1) {
-  const d = db();
-  const existing = d
-    .prepare(
-      "SELECT value FROM signals WHERE user_id = ? AND article_id = ?"
-    )
-    .get(USER_ID, articleId) as { value: number } | undefined;
+// Signal is a running score in [-50, 50] (Like nudges up, Less nudges down).
+// The client owns the counter and pushes the desired absolute value here, so
+// rapid repeated clicks are just last-write-wins. A value of 0 clears the row.
+export const SIGNAL_MAX = 50;
 
-  if (existing?.value === value) {
-    d.prepare(
-      "DELETE FROM signals WHERE user_id = ? AND article_id = ?"
-    ).run(USER_ID, articleId);
-    return;
+export function setSignal(articleId: number, value: number): number {
+  const clamped = Math.max(-SIGNAL_MAX, Math.min(SIGNAL_MAX, Math.trunc(value)));
+  const d = db();
+
+  if (clamped === 0) {
+    d.prepare("DELETE FROM signals WHERE user_id = ? AND article_id = ?").run(
+      USER_ID,
+      articleId
+    );
+    return 0;
   }
   d.prepare(
     `INSERT INTO signals (user_id, article_id, value, created_at)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id, article_id) DO UPDATE SET value = excluded.value, created_at = excluded.created_at`
-  ).run(USER_ID, articleId, value, Math.floor(Date.now() / 1000));
+  ).run(USER_ID, articleId, clamped, Math.floor(Date.now() / 1000));
+  return clamped;
 }
 
 // Follow a catalog feed: copy it into `sources` (so ingest will poll it) and

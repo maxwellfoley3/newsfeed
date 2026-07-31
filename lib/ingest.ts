@@ -118,6 +118,12 @@ export async function ingestSource(source: Source): Promise<IngestResult> {
     "media:thumbnail"?: MediaNode | MediaNode[];
   };
 
+  // Stamp the poll attempt regardless of outcome, so a dead or slow feed isn't
+  // retried on every single page load — staleness is measured from the attempt.
+  database
+    .prepare("UPDATE sources SET last_polled_at = ? WHERE id = ?")
+    .run(now, source.id);
+
   try {
     const feed = await withTimeout(parser.parseURL(source.url), HARD_TIMEOUT_MS, source.name);
     const insertMany = database.transaction((items: FeedEntry[]) => {
@@ -186,4 +192,50 @@ export async function ingestAll(
 
   const totalNew = results.reduce((sum, r) => sum + r.added, 0);
   return { results, totalNew };
+}
+
+// How old a source's last poll must be before a page load will refresh it.
+const STALE_AFTER_MS = 15 * 60 * 1000;
+
+// One refresh in flight at a time per process — concurrent page loads share it
+// instead of each kicking off their own overlapping sweep.
+let refreshInFlight: Promise<void> | null = null;
+
+// Fire-and-forget refresh for the reader pages: poll only the SUBSCRIBED
+// sources whose last poll is older than STALE_AFTER_MS (or never polled).
+// Returns immediately if nothing is stale or a refresh is already running, so
+// it's cheap to call on every render. Callers should NOT await this — the
+// current request serves whatever is already in SQLite; fresh rows land for
+// the next load. Never throws.
+export function refreshStaleInBackground(): void {
+  if (refreshInFlight) return;
+
+  const cutoff = Math.floor((Date.now() - STALE_AFTER_MS) / 1000);
+  const stale = db()
+    .prepare(
+      `SELECT s.id, s.name, s.url
+         FROM sources s
+         JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = ?
+        WHERE s.last_polled_at IS NULL OR s.last_polled_at < ?
+        ORDER BY s.last_polled_at IS NOT NULL, s.last_polled_at ASC`
+    )
+    .all(USER_ID, cutoff) as Source[];
+
+  if (stale.length === 0) return;
+
+  // Worker pool over just the stale set. ingestSource never throws and stamps
+  // last_polled_at up front, so this can't hammer a dead feed each load.
+  let next = 0;
+  const concurrency = Math.min(8, stale.length);
+  async function worker() {
+    while (next < stale.length) {
+      await ingestSource(stale[next++]);
+    }
+  }
+  refreshInFlight = Promise.all(Array.from({ length: concurrency }, () => worker()))
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      refreshInFlight = null;
+    });
 }

@@ -13,9 +13,11 @@ import {
 import { ingestSource } from "@/lib/ingest";
 import { FEED_PAGE_SIZE } from "./feed-config";
 
-export async function submitSignal(articleId: number, value: 1 | -1) {
-  setSignal(articleId, value);
-  revalidatePath("/");
+// The client sends the desired absolute score (clamped to ±50 server-side).
+// No revalidatePath: re-sorting the feed on every click would yank rows around
+// mid-tap. Returns the stored value so the client can reconcile if it drifts.
+export async function submitSignal(articleId: number, value: number): Promise<number> {
+  return setSignal(articleId, value);
 }
 
 // Next batch for the infinite-scroll feed. Chronological + bounded: when this
