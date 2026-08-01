@@ -1,13 +1,15 @@
-import { getDiscoverFeeds, type DiscoverFeed } from "@/lib/db";
-import { DiscoverList } from "../DiscoverList";
+import { getDiscoverArticles, type FeedItem } from "@/lib/db";
+import { FeedList } from "../FeedList";
+import { loadMoreDiscoverArticles } from "../actions";
 import { FEED_PAGE_SIZE } from "../feed-config";
 
-// Reflect follows immediately — followed feeds drop out of the pool.
+// Reflect follows immediately — followed sources drop out of the pool.
 export const dynamic = "force-dynamic";
 
 export default function ForYouPage() {
-  // First screen only; DiscoverList infinite-scrolls the rest.
-  const items: DiscoverFeed[] = getDiscoverFeeds({ limit: FEED_PAGE_SIZE });
+  // Articles from sources you don't follow yet, newest first (pre-ranking).
+  const items: FeedItem[] = getDiscoverArticles({ limit: FEED_PAGE_SIZE });
+  const now = Math.floor(Date.now() / 1000);
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
@@ -16,12 +18,12 @@ export default function ForYouPage() {
           For You
         </h1>
         <p className="mt-1.5 text-sm" style={{ color: "var(--muted)" }}>
-          Feeds worth trying, from sources you don&apos;t follow yet. Follow one and its
-          articles join your Following feed.
+          Articles from sources you don&apos;t follow yet. Open a source to follow it —
+          its posts then join your Following feed.
         </p>
       </header>
 
-      <DiscoverList items={items} />
+      <FeedList items={items} now={now} loadMore={loadMoreDiscoverArticles} />
 
       <footer
         className="mt-6 border-t pt-5 text-xs"

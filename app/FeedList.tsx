@@ -25,6 +25,7 @@ export function FeedList({
   sourceId,
   linkSource = true,
   now,
+  loadMore: loadMoreProp,
 }: {
   items: FeedItem[];
   sourceId?: string;
@@ -32,7 +33,12 @@ export function FeedList({
   // Request-time clock (epoch seconds) from the server. Shared by SSR and the
   // first client render so relative timestamps hydrate cleanly.
   now: number;
+  // How to fetch the next page, given the current offset (and optional count).
+  // Defaults to the Following-feed loader; the For You page injects the
+  // unfollowed-articles loader instead.
+  loadMore?: (offset: number, limit?: number) => Promise<FeedItem[]>;
 }) {
+  const fetchPage = loadMoreProp ?? ((offset, limit) => loadMoreFeed(offset, sourceId, limit));
   const [items, setItems] = useState<FeedItem[]>(initialItems);
   // Start from the server's `now` (so the first client render matches the SSR
   // HTML), then switch to the real client clock after mount and keep it ticking
@@ -74,7 +80,7 @@ export function FeedList({
   const loadMore = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await loadMoreFeed(items.length, sourceId);
+      const next = await fetchPage(items.length);
       if (next.length < FEED_PAGE_SIZE) setDone(true);
       if (next.length > 0) {
         setItems((prev) => {
@@ -154,7 +160,7 @@ export function FeedList({
 
     (async () => {
       // One fetch for the whole gap, so restoration isn't 15-at-a-time.
-      const rest = await loadMoreFeed(initialItems.length, sourceId, missing);
+      const rest = await fetchPage(initialItems.length, missing);
       if (cancelled) return;
       if (rest.length < missing) setDone(true);
       if (rest.length > 0) {

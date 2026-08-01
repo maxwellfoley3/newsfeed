@@ -194,6 +194,89 @@ export async function ingestAll(
   return { results, totalNew };
 }
 
+// Discover (For You) ingest: sample UNFOLLOWED catalog feeds, copy each into
+// `sources` (without subscribing, so it stays in the discover pool), and fetch
+// its articles. Selection = the "what to ingest" heuristic: bias toward
+// categories you already follow, then never-polled feeds, then the
+// least-recently polled — so coverage of the 2.5k-feed catalog grows over time
+// without re-hammering the same feeds. Never throws per feed (ingestSource
+// swallows errors); returns the same shape as ingestAll.
+export async function ingestDiscover(
+  limit = 60,
+  onResult?: (r: IngestResult) => void,
+  concurrency = 8
+): Promise<{ results: IngestResult[]; totalNew: number }> {
+  const d = db();
+
+  type CatalogFeed = {
+    id: string;
+    name: string;
+    url: string;
+    homepage: string | null;
+    category: string | null;
+    provenance: string | null;
+  };
+
+  // Catalog feeds the user doesn't already follow, prioritized for exploration.
+  const feeds = d
+    .prepare(
+      `SELECT c.id, c.title AS name, c.url, c.homepage, c.category, c.provenance
+         FROM catalog c
+         LEFT JOIN sources src ON src.id = c.id
+        WHERE c.url NOT IN (
+                SELECT s.url FROM sources s
+                  JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = @user
+              )
+        ORDER BY
+          (c.category IN (
+             SELECT DISTINCT s2.category FROM sources s2
+               JOIN subscriptions sub2 ON sub2.source_id = s2.id AND sub2.user_id = @user
+              WHERE s2.category IS NOT NULL
+          )) DESC,
+          (src.last_polled_at IS NOT NULL),
+          src.last_polled_at ASC,
+          c.sort_key ASC
+        LIMIT @limit`
+    )
+    .all({ user: USER_ID, limit }) as CatalogFeed[];
+
+  // Copy a sampled catalog feed into `sources` (no subscription) so its articles
+  // have a valid source_id to hang off of. Mirrors followFromCatalog's mapping
+  // (affiliation = provenance) minus the subscribe.
+  const upsertSource = d.prepare(`
+    INSERT INTO sources (id, name, url, homepage, category, affiliation, note)
+    VALUES (@id, @name, @url, @homepage, @category, @affiliation, NULL)
+    ON CONFLICT(id) DO UPDATE SET
+      name=excluded.name, url=excluded.url, homepage=excluded.homepage,
+      category=excluded.category, affiliation=excluded.affiliation
+  `);
+
+  const results: IngestResult[] = [];
+  let next = 0;
+  async function worker() {
+    while (next < feeds.length) {
+      const f = feeds[next++];
+      upsertSource.run({
+        id: f.id,
+        name: f.name,
+        url: f.url,
+        homepage: f.homepage,
+        category: f.category,
+        affiliation: f.provenance,
+      });
+      const r = await ingestSource({ id: f.id, name: f.name, url: f.url });
+      results.push(r);
+      onResult?.(r);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, feeds.length) }, () => worker())
+  );
+
+  const totalNew = results.reduce((sum, r) => sum + r.added, 0);
+  return { results, totalNew };
+}
+
 // How old a source's last poll must be before a page load will refresh it.
 const STALE_AFTER_MS = 15 * 60 * 1000;
 

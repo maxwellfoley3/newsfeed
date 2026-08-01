@@ -9,7 +9,8 @@
     "start": "next start -p 3200",
     "start:tailnet": "next start -p 3200 -H 100.86.175.73",
     "dev:tailnet": "next dev -p 3200 -H 100.86.175.73",
-    "ingest": "tsx scripts/ingest.ts"
+    "ingest": "tsx scripts/ingest.ts",
+    "ingest:discover": "tsx scripts/ingest-discover.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

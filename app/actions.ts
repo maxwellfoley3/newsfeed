@@ -5,6 +5,7 @@ import {
   getFeed,
   setSignal,
   getDiscoverFeeds,
+  getDiscoverArticles,
   followFromCatalog,
   unfollowSource,
   subscribe,
@@ -32,6 +33,15 @@ export async function loadMoreFeed(
   limit: number = FEED_PAGE_SIZE
 ): Promise<FeedItem[]> {
   return getFeed({ sourceId, limit, offset });
+}
+
+// Next batch of For You articles (from unfollowed sources), newest first.
+// Mirrors loadMoreFeed's offset pagination so FeedList can drive it.
+export async function loadMoreDiscoverArticles(
+  offset: number,
+  limit: number = FEED_PAGE_SIZE
+): Promise<FeedItem[]> {
+  return getDiscoverArticles({ limit, offset });
 }
 
 // ---- For You (discovery) --------------------------------------------------
