@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { getFollowedSources, type Source } from "@/lib/db";
+import { getFollowedSources, type FollowedSource } from "@/lib/db";
 import { UnfollowButton } from "../UnfollowButton";
+import { PinButton } from "../PinButton";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ function hostname(url: string | null): string {
 // The full list of sources the user follows. Reached from the "Following N"
 // chip on the feed header. Each row links to that source's own feed page.
 export default function FollowingListPage() {
-  const sources: Source[] = getFollowedSources();
+  const sources: FollowedSource[] = getFollowedSources();
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
@@ -79,7 +80,8 @@ export default function FollowingListPage() {
                     )}
                   </div>
                 </div>
-                <div className="pt-0.5">
+                <div className="flex shrink-0 items-center gap-2 pt-0.5">
+                  <PinButton sourceId={s.id} pinned={s.pinned} />
                   <UnfollowButton sourceId={s.id} sourceName={s.name} />
                 </div>
               </div>

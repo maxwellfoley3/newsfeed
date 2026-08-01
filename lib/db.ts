@@ -45,6 +45,16 @@ function migrate(d: Database.Database) {
       FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
     );
 
+    -- Pinned sources: the latest article from each surfaces in a "Pinned"
+    -- section atop the Following feed.
+    CREATE TABLE IF NOT EXISTS pins (
+      user_id    TEXT NOT NULL,
+      source_id  TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, source_id),
+      FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS articles (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       source_id    TEXT NOT NULL,
@@ -233,8 +243,10 @@ export type FeedItem = {
   signal: number | null; // 1 like, -1 dislike, null none
 };
 
-// The Following feed: articles from subscribed sources, newest first.
-// Pass a sourceId to restrict to a single source.
+// The Following feed: articles from subscribed sources, newest first. Pass a
+// sourceId to restrict to a single source — in that case the subscription
+// filter is dropped, so a source's own page shows its articles whether or not
+// you currently follow it (the main aggregate feed stays subscription-gated).
 export function getFeed(
   opts: { sourceId?: string; limit?: number; offset?: number } = {}
 ): FeedItem[] {
@@ -246,15 +258,41 @@ export function getFeed(
               sig.value AS signal
          FROM articles a
          JOIN sources s ON s.id = a.source_id
-         JOIN subscriptions sub
-           ON sub.source_id = a.source_id AND sub.user_id = @user
          LEFT JOIN signals sig
            ON sig.article_id = a.id AND sig.user_id = @user
         WHERE (@sourceId IS NULL OR a.source_id = @sourceId)
+          AND (@sourceId IS NOT NULL
+               OR EXISTS (SELECT 1 FROM subscriptions sub
+                           WHERE sub.source_id = a.source_id AND sub.user_id = @user))
         ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC
         LIMIT @limit OFFSET @offset`
     )
     .all({ user: USER_ID, sourceId, limit, offset }) as FeedItem[];
+}
+
+// The latest article from each pinned source, newest first. Backs the "Pinned"
+// section at the top of the Following feed. Sources with no fetched articles
+// yet are simply omitted (nothing to show). Shares the FeedItem shape so it can
+// render with the same card as the feed.
+export function getPinnedFeedItems(): FeedItem[] {
+  return db()
+    .prepare(
+      `SELECT a.id, a.title, a.url, a.summary, a.image_url, a.image_width, a.published_at,
+              s.id AS source_id, s.name AS source_name, s.affiliation,
+              sig.value AS signal
+         FROM pins p
+         JOIN sources s ON s.id = p.source_id
+         JOIN articles a ON a.id = (
+              SELECT a2.id FROM articles a2
+               WHERE a2.source_id = p.source_id
+               ORDER BY (a2.published_at IS NULL), a2.published_at DESC, a2.id DESC
+               LIMIT 1
+            )
+         LEFT JOIN signals sig ON sig.article_id = a.id AND sig.user_id = @user
+        WHERE p.user_id = @user
+        ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC`
+    )
+    .all({ user: USER_ID }) as FeedItem[];
 }
 
 export type Source = {
@@ -281,16 +319,39 @@ export function getFollowedCount(): number {
   return row.n;
 }
 
-// Every source the user follows, alphabetically. Backs the /following-list page.
-export function getFollowedSources(): Source[] {
-  return db()
+// Whether the user follows this source (drives the source page's follow toggle).
+export function isFollowing(sourceId: string): boolean {
+  const row = db()
+    .prepare("SELECT 1 AS x FROM subscriptions WHERE user_id = ? AND source_id = ?")
+    .get(USER_ID, sourceId);
+  return !!row;
+}
+
+// Whether the user has pinned this source (drives the source page's Pin button).
+export function isPinned(sourceId: string): boolean {
+  const row = db()
+    .prepare("SELECT 1 AS x FROM pins WHERE user_id = ? AND source_id = ?")
+    .get(USER_ID, sourceId);
+  return !!row;
+}
+
+export type FollowedSource = Source & { pinned: boolean };
+
+// Every source the user follows, alphabetically, each flagged with whether it's
+// pinned. Backs the /following-list page (Pin + Unfollow controls per row).
+export function getFollowedSources(): FollowedSource[] {
+  const rows = db()
     .prepare(
-      `SELECT s.id, s.name, s.homepage, s.category, s.affiliation
+      `SELECT s.id, s.name, s.homepage, s.category, s.affiliation,
+              (p.source_id IS NOT NULL) AS pinned
          FROM sources s
          JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = @user
+         LEFT JOIN pins p ON p.source_id = s.id AND p.user_id = @user
         ORDER BY s.name COLLATE NOCASE ASC`
     )
-    .all({ user: USER_ID }) as Source[];
+    .all({ user: USER_ID }) as Array<Source & { pinned: number }>;
+  // SQLite returns the boolean expression as 0/1 — normalize to a real boolean.
+  return rows.map((r) => ({ ...r, pinned: !!r.pinned }));
 }
 
 export type DiscoverFeed = {
@@ -404,4 +465,27 @@ export function unfollowSource(sourceId: string) {
   db()
     .prepare("DELETE FROM subscriptions WHERE user_id = ? AND source_id = ?")
     .run(USER_ID, sourceId);
+}
+
+// Re-follow a source already present in the sources table (e.g. after unfollow
+// on its own page). Its previously-fetched articles become visible again.
+export function subscribe(sourceId: string) {
+  db()
+    .prepare("INSERT OR IGNORE INTO subscriptions (user_id, source_id) VALUES (?, ?)")
+    .run(USER_ID, sourceId);
+}
+
+// Pin / unpin a source. Idempotent either way.
+export function setPin(sourceId: string, pinned: boolean) {
+  const d = db();
+  if (pinned) {
+    d.prepare(
+      "INSERT OR IGNORE INTO pins (user_id, source_id, created_at) VALUES (?, ?, ?)"
+    ).run(USER_ID, sourceId, Math.floor(Date.now() / 1000));
+  } else {
+    d.prepare("DELETE FROM pins WHERE user_id = ? AND source_id = ?").run(
+      USER_ID,
+      sourceId
+    );
+  }
 }

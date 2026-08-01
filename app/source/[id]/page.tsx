@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getFeed, getSource, type FeedItem } from "@/lib/db";
+import { getFeed, getSource, isPinned, isFollowing, type FeedItem } from "@/lib/db";
 import { FeedList } from "../../FeedList";
+import { PinButton } from "../../PinButton";
+import { SourceFollowButton } from "../../SourceFollowButton";
 import { FEED_PAGE_SIZE } from "../../feed-config";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +18,8 @@ export default async function SourcePage({
   if (!source) notFound();
 
   const items: FeedItem[] = getFeed({ sourceId: id, limit: FEED_PAGE_SIZE });
+  const pinned = isPinned(id);
+  const following = isFollowing(id);
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
@@ -27,9 +31,15 @@ export default async function SourcePage({
         >
           ← Following
         </Link>
-        <h1 className="mt-2 text-4xl font-semibold" style={{ letterSpacing: "-0.021em" }}>
-          {source.name}
-        </h1>
+        <div className="mt-2 flex items-start justify-between gap-4">
+          <h1 className="text-4xl font-semibold" style={{ letterSpacing: "-0.021em" }}>
+            {source.name}
+          </h1>
+          <div className="flex items-center gap-2 pt-1.5">
+            <PinButton sourceId={id} pinned={pinned} />
+            <SourceFollowButton sourceId={id} sourceName={source.name} following={following} />
+          </div>
+        </div>
         <p
           className="mt-1.5 flex flex-wrap items-center gap-2 text-sm"
           style={{ color: "var(--muted)" }}

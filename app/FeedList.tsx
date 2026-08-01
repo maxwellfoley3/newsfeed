@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import type { FeedItem } from "@/lib/db";
+import { relativeTime, hostname } from "@/lib/format";
 import { ArticleActions } from "./ArticleActions";
 import { loadMoreFeed } from "./actions";
 import { FEED_PAGE_SIZE } from "./feed-config";
@@ -11,31 +12,6 @@ import { FEED_PAGE_SIZE } from "./feed-config";
 // Only show feed images the source advertises as wider than this. Applied at
 // display time (not ingest) so the threshold can change without re-ingesting.
 const MIN_IMAGE_WIDTH = 500;
-
-// `nowSec` is the reference "now" (epoch seconds). It's passed in rather than
-// read from Date.now() here so the server render and the first client render
-// agree — computing it inline would differ across the SSR/hydration gap and
-// trip React's hydration check.
-function relativeTime(epoch: number | null, nowSec: number): string {
-  if (!epoch) return "";
-  const diff = nowSec - epoch;
-  if (diff < 60) return "just now";
-  const mins = Math.floor(diff / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(epoch * 1000).toLocaleDateString();
-}
-
-function hostname(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
 
 // linkSource: render each source name as a link to its own feed.
 // Off on the single-source page (you're already there).

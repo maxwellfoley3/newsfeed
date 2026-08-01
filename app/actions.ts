@@ -7,6 +7,8 @@ import {
   getDiscoverFeeds,
   followFromCatalog,
   unfollowSource,
+  subscribe,
+  setPin,
   type FeedItem,
   type DiscoverFeed,
 } from "@/lib/db";
@@ -60,5 +62,28 @@ export async function unfollowFeed(sourceId: string): Promise<{ ok: boolean }> {
   unfollowSource(sourceId);
   revalidatePath("/");
   revalidatePath("/for-you");
+  revalidatePath(`/source/${sourceId}`);
+  return { ok: true };
+}
+
+// Re-follow a source already in the sources table (used by the source page's
+// follow toggle after an unfollow — no catalog fetch, articles already exist).
+export async function followSource(sourceId: string): Promise<{ ok: boolean }> {
+  subscribe(sourceId);
+  revalidatePath("/");
+  revalidatePath("/for-you");
+  revalidatePath(`/source/${sourceId}`);
+  return { ok: true };
+}
+
+// Pin / unpin a source. Revalidates the Following page so its "Pinned" section
+// reflects the change on next navigation.
+export async function togglePin(
+  sourceId: string,
+  pinned: boolean
+): Promise<{ ok: boolean }> {
+  setPin(sourceId, pinned);
+  revalidatePath("/");
+  revalidatePath(`/source/${sourceId}`);
   return { ok: true };
 }

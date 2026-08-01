@@ -1,7 +1,13 @@
 import Link from "next/link";
-import { getFeed, getFollowedCount, type FeedItem } from "@/lib/db";
+import {
+  getFeed,
+  getFollowedCount,
+  getPinnedFeedItems,
+  type FeedItem,
+} from "@/lib/db";
 import { refreshStaleInBackground } from "@/lib/ingest";
 import { FeedList } from "./FeedList";
+import { PinnedSection } from "./PinnedSection";
 import { FEED_PAGE_SIZE } from "./feed-config";
 
 // Always render fresh from the DB — this is the reader, it should reflect ingest.
@@ -15,6 +21,8 @@ export default function FollowingPage() {
   // First screen only; FeedList infinite-scrolls the rest in FEED_PAGE_SIZE batches.
   const items: FeedItem[] = getFeed({ limit: FEED_PAGE_SIZE });
   const followedCount = getFollowedCount();
+  const pinnedItems: FeedItem[] = getPinnedFeedItems();
+  const now = Math.floor(Date.now() / 1000);
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
@@ -35,7 +43,9 @@ export default function FollowingPage() {
         </Link>
       </header>
 
-      <FeedList items={items} now={Math.floor(Date.now() / 1000)} />
+      <PinnedSection items={pinnedItems} now={now} />
+
+      <FeedList items={items} now={now} />
     </main>
   );
 }
