@@ -4,6 +4,7 @@
 //   - app/actions.ts      (fetch-on-follow, so a just-followed feed fills in now)
 import Parser from "rss-parser";
 import { db, USER_ID } from "./db";
+import { normalizeCategory } from "./categories";
 
 type MediaNode = { $?: { url?: string; medium?: string; type?: string; width?: string } };
 
@@ -216,29 +217,66 @@ export async function ingestDiscover(
     category: string | null;
     provenance: string | null;
   };
+  type Candidate = CatalogFeed & { last_polled_at: number | null; sort_key: number };
 
-  // Catalog feeds the user doesn't already follow, prioritized for exploration.
-  const feeds = d
+  // The categories the user follows, normalized to the shared vocabulary so the
+  // match works across catalogs (ooh.directory slugs vs awesome-rss-feeds
+  // Title Case + country names). See lib/categories.ts.
+  const followedCats = new Set(
+    (
+      d
+        .prepare(
+          `SELECT DISTINCT s.category
+             FROM sources s
+             JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = ?
+            WHERE s.category IS NOT NULL`
+        )
+        .all(USER_ID) as Array<{ category: string }>
+    )
+      .map((r) => normalizeCategory(r.category))
+      .filter((c): c is string => c !== null)
+  );
+
+  // All catalog feeds the user doesn't follow, with each feed's last poll time.
+  // Prioritization (category bias → never-polled → oldest → sort_key) is done in
+  // JS below so the category match can run through normalizeCategory, which raw
+  // SQL string equality can't.
+  const candidates = d
     .prepare(
-      `SELECT c.id, c.title AS name, c.url, c.homepage, c.category, c.provenance
+      `SELECT c.id, c.title AS name, c.url, c.homepage, c.category, c.provenance,
+              c.sort_key AS sort_key, src.last_polled_at AS last_polled_at
          FROM catalog c
          LEFT JOIN sources src ON src.id = c.id
         WHERE c.url NOT IN (
                 SELECT s.url FROM sources s
                   JOIN subscriptions sub ON sub.source_id = s.id AND sub.user_id = @user
-              )
-        ORDER BY
-          (c.category IN (
-             SELECT DISTINCT s2.category FROM sources s2
-               JOIN subscriptions sub2 ON sub2.source_id = s2.id AND sub2.user_id = @user
-              WHERE s2.category IS NOT NULL
-          )) DESC,
-          (src.last_polled_at IS NOT NULL),
-          src.last_polled_at ASC,
-          c.sort_key ASC
-        LIMIT @limit`
+              )`
     )
-    .all({ user: USER_ID, limit }) as CatalogFeed[];
+    .all({ user: USER_ID }) as Candidate[];
+
+  const matchesFollowedCategory = (cat: string | null): boolean => {
+    const nc = normalizeCategory(cat);
+    return nc !== null && followedCats.has(nc);
+  };
+
+  const feeds: CatalogFeed[] = candidates
+    .sort((a, b) => {
+      // 1. Feeds in a followed (normalized) category first.
+      const am = matchesFollowedCategory(a.category) ? 0 : 1;
+      const bm = matchesFollowedCategory(b.category) ? 0 : 1;
+      if (am !== bm) return am - bm;
+      // 2. Never-polled before already-polled.
+      const an = a.last_polled_at === null ? 0 : 1;
+      const bn = b.last_polled_at === null ? 0 : 1;
+      if (an !== bn) return an - bn;
+      // 3. Least-recently polled first (among polled).
+      if (a.last_polled_at !== null && b.last_polled_at !== null && a.last_polled_at !== b.last_polled_at) {
+        return a.last_polled_at - b.last_polled_at;
+      }
+      // 4. Stable browse order.
+      return a.sort_key - b.sort_key;
+    })
+    .slice(0, limit);
 
   // Copy a sampled catalog feed into `sources` (no subscription) so its articles
   // have a valid source_id to hang off of. Mirrors followFromCatalog's mapping
