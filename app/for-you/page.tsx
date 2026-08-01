@@ -18,8 +18,8 @@ export default function ForYouPage() {
           For You
         </h1>
         <p className="mt-1.5 text-sm" style={{ color: "var(--muted)" }}>
-          Articles from sources you don&apos;t follow yet. Open a source to follow it —
-          its posts then join your Following feed.
+          A mix of posts from sources you follow and ones you don&apos;t yet. Open any
+          source to follow or unfollow it.
         </p>
       </header>
 

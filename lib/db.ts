@@ -295,10 +295,12 @@ export function getPinnedFeedItems(): FeedItem[] {
     .all({ user: USER_ID }) as FeedItem[];
 }
 
-// The For You article pool: articles from sources the user does NOT follow,
-// newest first (the pre-ranking order — R1 will later sort by score instead).
-// These rows exist because the discover-ingest job copies sampled catalog feeds
-// into `sources` (without subscribing) and fetches their articles.
+// The For You article pool: articles from ALL known sources — followed
+// (exploit) and unfollowed (explore) blended together — newest first for now.
+// This is the pre-ranking order; R1 will later sort by score, which is what
+// actually interleaves taste-matched followed posts with exploratory unfollowed
+// ones. Unfollowed articles exist because the discover-ingest job copies sampled
+// catalog feeds into `sources` (without subscribing) and fetches their articles.
 export function getDiscoverArticles(
   opts: { limit?: number; offset?: number } = {}
 ): FeedItem[] {
@@ -311,10 +313,6 @@ export function getDiscoverArticles(
          FROM articles a
          JOIN sources s ON s.id = a.source_id
          LEFT JOIN signals sig ON sig.article_id = a.id AND sig.user_id = @user
-        WHERE NOT EXISTS (
-                SELECT 1 FROM subscriptions sub
-                 WHERE sub.source_id = a.source_id AND sub.user_id = @user
-              )
         ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC
         LIMIT @limit OFFSET @offset`
     )
