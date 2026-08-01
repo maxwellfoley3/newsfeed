@@ -5,7 +5,7 @@ import {
   getFeed,
   setSignal,
   getDiscoverFeeds,
-  getDiscoverArticles,
+  getRankedDiscoverArticles,
   followFromCatalog,
   unfollowSource,
   subscribe,
@@ -39,9 +39,10 @@ export async function loadMoreFeed(
 // Mirrors loadMoreFeed's offset pagination so FeedList can drive it.
 export async function loadMoreDiscoverArticles(
   offset: number,
-  limit: number = FEED_PAGE_SIZE
+  limit: number = FEED_PAGE_SIZE,
+  onlyUnfollowed: boolean = false
 ): Promise<FeedItem[]> {
-  return getDiscoverArticles({ limit, offset });
+  return getRankedDiscoverArticles({ limit, offset, onlyUnfollowed });
 }
 
 // ---- For You (discovery) --------------------------------------------------

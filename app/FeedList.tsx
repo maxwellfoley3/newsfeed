@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { FeedItem } from "@/lib/db";
 import { relativeTime, hostname } from "@/lib/format";
 import { ArticleActions } from "./ArticleActions";
+import { useAdminMode } from "./AdminMode";
 import { loadMoreFeed } from "./actions";
 import { FEED_PAGE_SIZE } from "./feed-config";
 
@@ -39,6 +40,7 @@ export function FeedList({
   loadMore?: (offset: number, limit?: number) => Promise<FeedItem[]>;
 }) {
   const fetchPage = loadMoreProp ?? ((offset, limit) => loadMoreFeed(offset, sourceId, limit));
+  const admin = useAdminMode();
   const [items, setItems] = useState<FeedItem[]>(initialItems);
   // Start from the server's `now` (so the first client render matches the SSR
   // HTML), then switch to the real client clock after mount and keep it ticking
@@ -233,6 +235,18 @@ export function FeedList({
               )}
               {a.affiliation && <span className="opacity-70">· {a.affiliation}</span>}
               <span className="opacity-70">· {relativeTime(a.published_at, nowSec)}</span>
+              {admin && a.rank && (
+                <span
+                  className="rounded-full px-1.5 py-0.5 font-semibold"
+                  style={{ background: "#c0392b", color: "#ffffff" }}
+                  title={`taste ${a.rank.taste.toFixed(2)} · affinity ${a.rank.affinity.toFixed(2)}${
+                    a.rank.terms.length ? ` · matched: ${a.rank.terms.join(", ")}` : ""
+                  }`}
+                >
+                  {a.rank.score.toFixed(2)} · t{a.rank.taste.toFixed(2)} a{a.rank.affinity.toFixed(2)}
+                  {a.rank.terms.length > 0 && ` · ${a.rank.terms.join(", ")}`}
+                </span>
+              )}
             </div>
 
             <a

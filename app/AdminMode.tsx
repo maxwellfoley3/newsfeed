@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 // Global admin-mode toggle. Press ⌘A (Ctrl+A on non-Mac) to flip it; a badge
-// shows in the top-right while it's on. State persists in localStorage so it
-// survives reloads. Mounted once in the root layout, so it's available on every
-// page; other components can read the flag from localStorage["adminMode"] (or
-// this can be lifted into a context once something needs to react to it).
+// shows in the top-right while it's on, and any component under the provider can
+// read the flag via useAdminMode(). State persists in localStorage so it
+// survives reloads.
 const STORAGE_KEY = "adminMode";
 
-export function AdminMode() {
+const AdminModeContext = createContext(false);
+
+export function useAdminMode(): boolean {
+  return useContext(AdminModeContext);
+}
+
+export function AdminModeProvider({ children }: { children: ReactNode }) {
   const [admin, setAdmin] = useState(false);
 
   // Restore persisted state on mount (client-only, so no hydration mismatch:
@@ -42,15 +47,18 @@ export function AdminMode() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  if (!admin) return null;
-
   return (
-    <div
-      aria-live="polite"
-      className="fixed right-4 top-4 z-50 select-none rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide text-white shadow-lg"
-      style={{ background: "#c0392b", letterSpacing: "0.06em" }}
-    >
-      Admin Mode
-    </div>
+    <AdminModeContext.Provider value={admin}>
+      {admin && (
+        <div
+          aria-live="polite"
+          className="fixed right-4 top-4 z-50 select-none rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide text-white shadow-lg"
+          style={{ background: "#c0392b", letterSpacing: "0.06em" }}
+        >
+          Admin Mode
+        </div>
+      )}
+      {children}
+    </AdminModeContext.Provider>
   );
 }

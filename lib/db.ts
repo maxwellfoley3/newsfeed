@@ -2,6 +2,8 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { buildTasteScorer } from "./rank";
+import { buildSourceAffinity, type FeedDoc } from "./affinity";
 
 // v1.0 is single-user. Everything is scoped to this constant so the schema
 // is already multi-user-shaped when we need it.
@@ -241,6 +243,9 @@ export type FeedItem = {
   source_name: string;
   affiliation: string | null;
   signal: number | null; // 1 like, -1 dislike, null none
+  // Attached only by getRankedDiscoverArticles for the admin-mode debug badge:
+  // combined score plus its TasteMatch/SourceAffinity components and top terms.
+  rank?: { score: number; taste: number; affinity: number; terms: string[] };
 };
 
 // The Following feed: articles from subscribed sources, newest first. Pass a
@@ -302,9 +307,9 @@ export function getPinnedFeedItems(): FeedItem[] {
 // ones. Unfollowed articles exist because the discover-ingest job copies sampled
 // catalog feeds into `sources` (without subscribing) and fetches their articles.
 export function getDiscoverArticles(
-  opts: { limit?: number; offset?: number } = {}
+  opts: { limit?: number; offset?: number; onlyUnfollowed?: boolean } = {}
 ): FeedItem[] {
-  const { limit = 150, offset = 0 } = opts;
+  const { limit = 150, offset = 0, onlyUnfollowed = false } = opts;
   return db()
     .prepare(
       `SELECT a.id, a.title, a.url, a.summary, a.image_url, a.image_width, a.published_at,
@@ -313,10 +318,121 @@ export function getDiscoverArticles(
          FROM articles a
          JOIN sources s ON s.id = a.source_id
          LEFT JOIN signals sig ON sig.article_id = a.id AND sig.user_id = @user
+        WHERE (@onlyUnfollowed = 0 OR NOT EXISTS (
+                SELECT 1 FROM subscriptions sub
+                 WHERE sub.source_id = a.source_id AND sub.user_id = @user
+              ))
         ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC
         LIMIT @limit OFFSET @offset`
     )
-    .all({ user: USER_ID, limit, offset }) as FeedItem[];
+    .all({ user: USER_ID, limit, offset, onlyUnfollowed: onlyUnfollowed ? 1 : 0 }) as FeedItem[];
+}
+
+// R1 v0: rank the For You pool by TasteMatch (TF-IDF cosine vs your like/less
+// vector) + SourceAffinity (how close a candidate's feed is to the feeds you
+// follow), newest-first as the tiebreak. Ranks a bounded window of the most
+// recent candidates (POOL_CAP) so cost stays flat; when neither signal exists it
+// falls back to pure recency. Pagination slices the deterministic ranking, so
+// successive loadMore calls stay stable. Weights are the tuning knobs.
+const RANK_POOL_CAP = 500;
+const W_TASTE = 1.0;
+const W_AFFINITY = 0.6;
+// Recent articles per feed folded into its similarity profile — a single poll's
+// worth is plenty (see RECS: breadth over depth).
+const PROFILE_ITEMS_PER_FEED = 30;
+
+export function getRankedDiscoverArticles(
+  opts: { limit?: number; offset?: number; onlyUnfollowed?: boolean } = {}
+): FeedItem[] {
+  const { limit = 150, offset = 0, onlyUnfollowed = false } = opts;
+  const d = db();
+
+  const pool = getDiscoverArticles({ limit: RANK_POOL_CAP, offset: 0, onlyUnfollowed });
+
+  // --- TasteMatch ---
+  const labeled = d
+    .prepare(
+      `SELECT a.title, a.summary, sig.value AS signal
+         FROM signals sig
+         JOIN articles a ON a.id = sig.article_id
+        WHERE sig.user_id = ? AND sig.value != 0`
+    )
+    .all(USER_ID) as Array<{ title: string; summary: string | null; signal: number }>;
+  const scorer = buildTasteScorer(
+    pool.map((a) => `${a.title} ${a.summary ?? ""}`),
+    labeled
+  );
+
+  // --- SourceAffinity: profile the followed feeds + the pool's candidate feeds ---
+  const followed = new Set(
+    (d.prepare("SELECT source_id FROM subscriptions WHERE user_id = ?").all(USER_ID) as Array<{
+      source_id: string;
+    }>).map((r) => r.source_id)
+  );
+  const feedIds = Array.from(new Set([...pool.map((a) => a.source_id), ...followed]));
+  const affinity = buildSourceAffinity(feedIds.length ? feedDocs(d, feedIds, followed) : []);
+
+  // Cold-start on both signals → keep recency order.
+  if (!scorer.hasTaste && !affinity.hasFollowedProfile) {
+    return pool.slice(offset, offset + limit);
+  }
+
+  const ranked = pool
+    .map((a, i) => {
+      const e = scorer.explain(`${a.title} ${a.summary ?? ""}`);
+      const aff = affinity.affinity(a.source_id);
+      return { a, i, taste: e.score, aff, terms: e.terms, score: W_TASTE * e.score + W_AFFINITY * aff };
+    })
+    .sort((x, y) => y.score - x.score || x.i - y.i)
+    .map((r) => ({
+      ...r.a,
+      rank: { score: r.score, taste: r.taste, affinity: r.aff, terms: r.terms },
+    }));
+
+  return ranked.slice(offset, offset + limit);
+}
+
+// Build per-feed profile documents (concatenated title+summary over each feed's
+// most recent PROFILE_ITEMS_PER_FEED articles) for the given source ids.
+function feedDocs(
+  d: Database.Database,
+  feedIds: string[],
+  followed: Set<string>
+): FeedDoc[] {
+  const placeholders = feedIds.map(() => "?").join(",");
+  const rows = d
+    .prepare(
+      `SELECT a.source_id, a.title, a.summary, s.category
+         FROM articles a
+         JOIN sources s ON s.id = a.source_id
+        WHERE a.source_id IN (${placeholders})
+        ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC`
+    )
+    .all(...feedIds) as Array<{
+    source_id: string;
+    title: string;
+    summary: string | null;
+    category: string | null;
+  }>;
+
+  const byFeed = new Map<string, { texts: string[]; category: string | null }>();
+  for (const r of rows) {
+    let entry = byFeed.get(r.source_id);
+    if (!entry) {
+      entry = { texts: [], category: r.category };
+      byFeed.set(r.source_id, entry);
+    }
+    if (entry.texts.length < PROFILE_ITEMS_PER_FEED) {
+      entry.texts.push(`${r.title} ${r.summary ?? ""}`);
+    }
+  }
+
+  return Array.from(byFeed, ([sourceId, e]) => ({
+    sourceId,
+    text: e.texts.join(" "),
+    category: e.category,
+    followed: followed.has(sourceId),
+  }));
 }
 
 export type Source = {

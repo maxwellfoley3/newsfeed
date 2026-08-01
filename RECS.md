@@ -114,7 +114,8 @@ candidate generation → scoring → diversification → cache ranked list → s
 **v0 (lexical, no deps).** Per candidate article:
 
 ```
-score = w1·TasteMatch + w2·Quality + w3·Freshness − w4·Redundancy + ε·Explore
+score = w1·TasteMatch + w2·Quality + w3·Freshness − w4·Redundancy
+        + w5·SourceAffinity + ε·Explore
 ```
 
 - **TasteMatch** — TF-IDF vectors over title+summary. Taste vector =
@@ -127,8 +128,40 @@ score = w1·TasteMatch + w2·Quality + w3·Freshness − w4·Redundancy + ε·Ex
 - **Freshness** — recency decay.
 - **Redundancy** — down-weight near-duplicate stories (same wire copy across
   sources) via title similarity, so the feed isn't ten takes on one event.
+- **SourceAffinity** — how close a candidate's *feed* is to the ones you
+  already follow, giving the recommender the feed-to-feed "network" sense that
+  pure article-text matching lacks (see the feed-similarity graph below). Works
+  from follows alone, so it carries cold-start before any like/less exists.
 - **Explore** — ε-greedy injection of unfollowed-source articles. This *is*
   Discover, folded in as the exploration arm.
+
+### Feed-similarity graph + SourceAffinity (planned addition)
+Pure article-text TF-IDF has no notion of feed-to-feed relatedness, so it can't
+surface sources *proximal* to the ones you follow. A **true** co-follow network
+("people who follow X also follow Y") needs multi-user data we don't have
+(single user) — so we derive proximity from **content + metadata** instead. No
+collaborative filtering, no embeddings, no new infrastructure:
+
+- **Feed profile.** Aggregate a feed's ingested items (title + summary) into one
+  feed-level TF-IDF vector — the feed's characteristic vocabulary.
+- **Similarity graph.** feed↔feed cosine over those profiles, blended with
+  normalized-category co-membership (see `lib/categories.ts`) as a prior =
+  weighted edges. "Proximal" = high similarity to your followed set.
+- **SourceAffinity term.** Score a candidate article by its feed's affinity to
+  the centroid of your followed feeds' profiles → the `+ w5·SourceAffinity`
+  term above. Because it keys off *follows*, not likes, it makes recommendations
+  useful on day one (fixes TasteMatch's cold-start).
+- **Caveat.** This is content/category proximity, not social co-follow
+  proximity; the richer version needs multiple users.
+
+**How much of each feed must we ingest to build this?** Breadth, not depth. A
+feed-level TF-IDF profile is stable with even ~10–30 items — i.e. a *single
+poll's worth* (RSS feeds advertise ~10–50 recent items, and we only have
+titles + ~300-char summaries anyway, not full text). So the existing
+discover-ingest (one poll per sampled feed) already yields enough text to place
+a feed in the graph; repeated polls only sharpen the profile over time. The real
+cost is polling *enough distinct feeds* of the 2,528, not fetching each deeply —
+no full-text fetch or historical backfill required.
 
 **v1 (LLM re-rank).** Lexical score shortlists ~30 → one batched Haiku call:
 "here are headlines this user liked / marked less; rank these candidates by how

@@ -1,6 +1,5 @@
-import { getDiscoverArticles, type FeedItem } from "@/lib/db";
-import { FeedList } from "../FeedList";
-import { loadMoreDiscoverArticles } from "../actions";
+import { getRankedDiscoverArticles, type FeedItem } from "@/lib/db";
+import { ForYouFeed } from "../ForYouFeed";
 import { FEED_PAGE_SIZE } from "../feed-config";
 
 // Reflect follows immediately — followed sources drop out of the pool.
@@ -8,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default function ForYouPage() {
   // Articles from sources you don't follow yet, newest first (pre-ranking).
-  const items: FeedItem[] = getDiscoverArticles({ limit: FEED_PAGE_SIZE });
+  const items: FeedItem[] = getRankedDiscoverArticles({ limit: FEED_PAGE_SIZE });
   const now = Math.floor(Date.now() / 1000);
 
   return (
@@ -23,7 +22,7 @@ export default function ForYouPage() {
         </p>
       </header>
 
-      <FeedList items={items} now={now} loadMore={loadMoreDiscoverArticles} />
+      <ForYouFeed initialItems={items} now={now} />
 
       <footer
         className="mt-6 border-t pt-5 text-xs"

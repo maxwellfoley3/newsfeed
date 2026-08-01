@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Nav } from "./Nav";
-import { AdminMode } from "./AdminMode";
+import { AdminModeProvider } from "./AdminMode";
 
 export const metadata: Metadata = {
   title: "newsfeed",
@@ -16,9 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <Nav />
-        <AdminMode />
-        {children}
+        <AdminModeProvider>
+          <Nav />
+          {children}
+        </AdminModeProvider>
       </body>
     </html>
   );
