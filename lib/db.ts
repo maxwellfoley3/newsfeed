@@ -337,6 +337,10 @@ export function getDiscoverArticles(
 const RANK_POOL_CAP = 500;
 const W_TASTE = 1.0;
 const W_AFFINITY = 0.6;
+// Cap how many articles a single feed can contribute to the ranked list, so one
+// high-volume source (e.g. a news megafeed) can't flood For You — affinity is
+// per-feed, so without this all of a feed's articles tie and cluster together.
+const MAX_PER_SOURCE = 3;
 // Recent articles per feed folded into its similarity profile — a single poll's
 // worth is plenty (see RECS: breadth over depth).
 const PROFILE_ITEMS_PER_FEED = 30;
@@ -380,7 +384,12 @@ export function getRankedDiscoverArticles(
   const ranked = pool
     .map((a, i) => {
       const e = scorer.explain(`${a.title} ${a.summary ?? ""}`);
-      const aff = affinity.affinity(a.source_id);
+      // SourceAffinity only applies to UNFOLLOWED candidates — it's there to
+      // decide which feeds you don't follow are worth surfacing. Applying it to
+      // followed feeds would just reward them for being in their own centroid,
+      // burying all exploration (they'd always win). Followed articles rank on
+      // TasteMatch alone.
+      const aff = followed.has(a.source_id) ? 0 : affinity.affinity(a.source_id);
       return { a, i, taste: e.score, aff, terms: e.terms, score: W_TASTE * e.score + W_AFFINITY * aff };
     })
     .sort((x, y) => y.score - x.score || x.i - y.i)
@@ -389,7 +398,18 @@ export function getRankedDiscoverArticles(
       rank: { score: r.score, taste: r.taste, affinity: r.aff, terms: r.terms },
     }));
 
-  return ranked.slice(offset, offset + limit);
+  // Per-source cap: keep at most MAX_PER_SOURCE from any one feed so a single
+  // high-volume source can't flood the list. Applied to the full ranking before
+  // pagination so offset/limit slices stay consistent across loadMore calls.
+  const perSource = new Map<string, number>();
+  const capped = ranked.filter((a) => {
+    const n = perSource.get(a.source_id) ?? 0;
+    if (n >= MAX_PER_SOURCE) return false;
+    perSource.set(a.source_id, n + 1);
+    return true;
+  });
+
+  return capped.slice(offset, offset + limit);
 }
 
 // Build per-feed profile documents (concatenated title+summary over each feed's
