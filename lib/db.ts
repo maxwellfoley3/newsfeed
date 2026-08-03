@@ -123,6 +123,11 @@ function migrate(d: Database.Database) {
   if (!srcCols.some((c) => c.name === "last_polled_at")) {
     d.exec("ALTER TABLE sources ADD COLUMN last_polled_at INTEGER");
   }
+  // RSS-declared feed language (e.g. "en-us", "it-it"), lowercased, or NULL when
+  // the feed doesn't declare one. Populated on each poll (see ingestSource).
+  if (!srcCols.some((c) => c.name === "language")) {
+    d.exec("ALTER TABLE sources ADD COLUMN language TEXT");
+  }
 }
 
 type Seed = {
@@ -245,7 +250,8 @@ export type FeedItem = {
   signal: number | null; // 1 like, -1 dislike, null none
   // Attached only by getRankedDiscoverArticles for the admin-mode debug badge:
   // combined score plus its TasteMatch/SourceAffinity components and top terms.
-  rank?: { score: number; taste: number; affinity: number; terms: string[] };
+  // `explore` marks a random serendipity pick injected outside the ranking.
+  rank?: { score: number; taste: number; affinity: number; terms: string[]; explore?: boolean };
 };
 
 // The Following feed: articles from subscribed sources, newest first. Pass a
@@ -322,6 +328,9 @@ export function getDiscoverArticles(
                 SELECT 1 FROM subscriptions sub
                  WHERE sub.source_id = a.source_id AND sub.user_id = @user
               ))
+          -- English only: keep English-declared feeds and undeclared ones,
+          -- drop feeds that explicitly declare a non-English language.
+          AND (s.language IS NULL OR s.language LIKE 'en%')
         ORDER BY (a.published_at IS NULL), a.published_at DESC, a.id DESC
         LIMIT @limit OFFSET @offset`
     )
@@ -341,6 +350,9 @@ const W_AFFINITY = 0.6;
 // high-volume source (e.g. a news megafeed) can't flood For You — affinity is
 // per-feed, so without this all of a feed's articles tie and cluster together.
 const MAX_PER_SOURCE = 3;
+// How many completely-random unfollowed articles to sprinkle into the top of For
+// You (the ε-greedy Explore arm — serendipity independent of taste/affinity).
+const EXPLORE_COUNT = 3;
 // Recent articles per feed folded into its similarity profile — a single poll's
 // worth is plenty (see RECS: breadth over depth).
 const PROFILE_ITEMS_PER_FEED = 30;
@@ -376,9 +388,14 @@ export function getRankedDiscoverArticles(
   const feedIds = Array.from(new Set([...pool.map((a) => a.source_id), ...followed]));
   const affinity = buildSourceAffinity(feedIds.length ? feedDocs(d, feedIds, followed) : []);
 
+  // First page gets a few random explore picks sprinkled in; later pages don't
+  // (keeps offset pagination stable — FeedList dedupes any later overlap by id).
+  const withExplore = (page: FeedItem[]) =>
+    offset === 0 ? injectRandomExplore(d, page, limit) : page;
+
   // Cold-start on both signals → keep recency order.
   if (!scorer.hasTaste && !affinity.hasFollowedProfile) {
-    return pool.slice(offset, offset + limit);
+    return withExplore(pool.slice(offset, offset + limit));
   }
 
   const ranked = pool
@@ -409,7 +426,59 @@ export function getRankedDiscoverArticles(
     return true;
   });
 
-  return capped.slice(offset, offset + limit);
+  return withExplore(capped.slice(offset, offset + limit));
+}
+
+// Pull EXPLORE_COUNT random unfollowed articles (excluding ids already on the
+// page) as FeedItems tagged rank.explore, for the serendipity injection.
+function randomExploreArticles(
+  d: Database.Database,
+  exclude: Set<number>,
+  n: number
+): FeedItem[] {
+  const rows = d
+    .prepare(
+      `SELECT a.id, a.title, a.url, a.summary, a.image_url, a.image_width, a.published_at,
+              s.id AS source_id, s.name AS source_name, s.affiliation,
+              sig.value AS signal
+         FROM articles a
+         JOIN sources s ON s.id = a.source_id
+         LEFT JOIN signals sig ON sig.article_id = a.id AND sig.user_id = @user
+        WHERE NOT EXISTS (
+                SELECT 1 FROM subscriptions sub
+                 WHERE sub.source_id = a.source_id AND sub.user_id = @user
+              )
+          AND (s.language IS NULL OR s.language LIKE 'en%')
+        ORDER BY RANDOM()
+        LIMIT @take`
+    )
+    .all({ user: USER_ID, take: n * 4 }) as FeedItem[];
+
+  const picks: FeedItem[] = [];
+  for (const r of rows) {
+    if (exclude.has(r.id)) continue;
+    picks.push({ ...r, rank: { score: 0, taste: 0, affinity: 0, terms: [], explore: true } });
+    if (picks.length >= n) break;
+  }
+  return picks;
+}
+
+// Splice random explore picks into a page at spaced positions near the top.
+function injectRandomExplore(
+  d: Database.Database,
+  page: FeedItem[],
+  limit: number
+): FeedItem[] {
+  const exclude = new Set(page.map((a) => a.id));
+  const randoms = randomExploreArticles(d, exclude, EXPLORE_COUNT);
+  if (randoms.length === 0) return page;
+  const result = [...page];
+  const step = Math.max(1, Math.floor(limit / (EXPLORE_COUNT + 1)));
+  randoms.forEach((r, i) => {
+    const idx = Math.min(result.length, (i + 1) * step + i);
+    result.splice(idx, 0, r);
+  });
+  return result;
 }
 
 // Build per-feed profile documents (concatenated title+summary over each feed's

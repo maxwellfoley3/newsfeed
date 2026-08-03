@@ -127,6 +127,13 @@ export async function ingestSource(source: Source): Promise<IngestResult> {
 
   try {
     const feed = await withTimeout(parser.parseURL(source.url), HARD_TIMEOUT_MS, source.name);
+
+    // Record the feed's declared language (channel <language>), lowercased, so
+    // For You can filter to English. NULL when the feed doesn't declare one.
+    const lang =
+      ((feed as { language?: string }).language ?? "").toLowerCase().trim() || null;
+    database.prepare("UPDATE sources SET language = ? WHERE id = ?").run(lang, source.id);
+
     const insertMany = database.transaction((items: FeedEntry[]) => {
       let added = 0;
       for (const item of items) {

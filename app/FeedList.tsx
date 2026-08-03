@@ -236,16 +236,26 @@ export function FeedList({
               {a.affiliation && <span className="opacity-70">· {a.affiliation}</span>}
               <span className="opacity-70">· {relativeTime(a.published_at, nowSec)}</span>
               {admin && a.rank && (
-                <span
-                  className="rounded-full px-1.5 py-0.5 font-semibold"
-                  style={{ background: "#c0392b", color: "#ffffff" }}
-                  title={`taste ${a.rank.taste.toFixed(2)} · affinity ${a.rank.affinity.toFixed(2)}${
-                    a.rank.terms.length ? ` · matched: ${a.rank.terms.join(", ")}` : ""
-                  }`}
-                >
-                  {a.rank.score.toFixed(2)} · t{a.rank.taste.toFixed(2)} a{a.rank.affinity.toFixed(2)}
-                  {a.rank.terms.length > 0 && ` · ${a.rank.terms.join(", ")}`}
-                </span>
+                a.rank.explore ? (
+                  <span
+                    className="rounded-full px-1.5 py-0.5 font-semibold"
+                    style={{ background: "#7d3c98", color: "#ffffff" }}
+                    title="random explore pick (serendipity injection)"
+                  >
+                    🎲 random
+                  </span>
+                ) : (
+                  <span
+                    className="rounded-full px-1.5 py-0.5 font-semibold"
+                    style={{ background: "#c0392b", color: "#ffffff" }}
+                    title={`taste ${a.rank.taste.toFixed(2)} · affinity ${a.rank.affinity.toFixed(2)}${
+                      a.rank.terms.length ? ` · matched: ${a.rank.terms.join(", ")}` : ""
+                    }`}
+                  >
+                    {a.rank.score.toFixed(2)} · t{a.rank.taste.toFixed(2)} a{a.rank.affinity.toFixed(2)}
+                    {a.rank.terms.length > 0 && ` · ${a.rank.terms.join(", ")}`}
+                  </span>
+                )
               )}
             </div>
 
