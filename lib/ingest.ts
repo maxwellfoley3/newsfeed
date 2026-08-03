@@ -3,8 +3,9 @@
 //   - scripts/ingest.ts   (the `npm run ingest` batch job)
 //   - app/actions.ts      (fetch-on-follow, so a just-followed feed fills in now)
 import Parser from "rss-parser";
-import { db, USER_ID } from "./db";
+import { db, USER_ID, getSourceByUrl, createUserSource, subscribe } from "./db";
 import { normalizeCategory } from "./categories";
+import { hostname } from "./format";
 
 type MediaNode = { $?: { url?: string; medium?: string; type?: string; width?: string } };
 
@@ -165,6 +166,72 @@ export async function ingestSource(source: Source): Promise<IngestResult> {
   } catch (err) {
     return { source, added: 0, error: (err as Error).message };
   }
+}
+
+// Follow a feed by its pasted RSS URL: validate it, look it up (re-subscribe if
+// we already know it), else fetch its metadata, create the source, subscribe,
+// and ingest its articles. Returns a small result the UI can surface.
+export async function addFeedByUrl(rawUrl: string): Promise<{
+  ok: boolean;
+  error?: string;
+  sourceId?: string;
+  name?: string;
+  added?: number;
+}> {
+  let url = (rawUrl ?? "").trim();
+  if (!url) return { ok: false, error: "Enter a feed URL" };
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, error: "That doesn't look like a valid URL" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, error: "Only http(s) feed URLs are supported" };
+  }
+
+  // Already in the catalog/sources? Just (re)subscribe and refresh it.
+  const existing = getSourceByUrl(url);
+  if (existing) {
+    subscribe(existing.id);
+    const r = await ingestSource({ id: existing.id, name: existing.name, url });
+    return { ok: true, sourceId: existing.id, name: existing.name, added: r.added };
+  }
+
+  // New URL — parse it to confirm it's a real feed and grab title/homepage.
+  let feed;
+  try {
+    feed = await withTimeout(parser.parseURL(url), HARD_TIMEOUT_MS, url);
+  } catch {
+    return { ok: false, error: "Couldn't read an RSS feed at that URL" };
+  }
+
+  const title = (feed.title ?? "").trim() || hostname(url) || url;
+  const homepage = (feed.link ?? "").trim() || null;
+  const id = `${slugify(title)}-${shortHash(url)}`;
+
+  createUserSource({ id, name: title, url, homepage });
+  subscribe(id);
+  const r = await ingestSource({ id, name: title, url });
+  return { ok: true, sourceId: id, name: title, added: r.added };
+}
+
+// URL-derived, collision-resistant source id: a title slug + a short stable
+// hash of the URL (so re-adding the same URL maps to the same source).
+function slugify(s: string): string {
+  const slug = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return slug || "feed";
+}
+
+function shortHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
 // Poll every SUBSCRIBED source (not the whole catalog). Runs feeds

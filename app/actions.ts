@@ -13,7 +13,7 @@ import {
   type FeedItem,
   type DiscoverFeed,
 } from "@/lib/db";
-import { ingestSource } from "@/lib/ingest";
+import { ingestSource, addFeedByUrl } from "@/lib/ingest";
 import { FEED_PAGE_SIZE } from "./feed-config";
 
 // The client sends the desired absolute score (clamped to ±50 server-side).
@@ -85,6 +85,22 @@ export async function followSource(sourceId: string): Promise<{ ok: boolean }> {
   revalidatePath("/for-you");
   revalidatePath(`/source/${sourceId}`);
   return { ok: true };
+}
+
+// Follow a feed by pasted RSS URL (from the following-list page).
+export async function followFeedByUrl(url: string): Promise<{
+  ok: boolean;
+  error?: string;
+  name?: string;
+  added?: number;
+}> {
+  const res = await addFeedByUrl(url);
+  if (res.ok) {
+    revalidatePath("/");
+    revalidatePath("/following-list");
+    revalidatePath("/for-you");
+  }
+  return res;
 }
 
 // Pin / unpin a source. Revalidates the Following page so its "Pinned" section

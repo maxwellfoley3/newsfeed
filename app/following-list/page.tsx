@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getFollowedSources, type FollowedSource } from "@/lib/db";
 import { UnfollowButton } from "../UnfollowButton";
 import { PinButton } from "../PinButton";
+import { AddFeedForm } from "../AddFeedForm";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export default function FollowingListPage() {
           Every source in your feed.
         </p>
       </header>
+
+      <AddFeedForm />
 
       {sources.length === 0 ? (
         <div

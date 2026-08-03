@@ -540,6 +540,31 @@ export function getSource(id: string): Source | undefined {
     .get(id) as Source | undefined;
 }
 
+// Look up a source by its feed URL (used when following by pasted URL, so we
+// re-subscribe to a feed we already know instead of duplicating it).
+export function getSourceByUrl(url: string): { id: string; name: string } | undefined {
+  return db()
+    .prepare("SELECT id, name FROM sources WHERE url = ?")
+    .get(url) as { id: string; name: string } | undefined;
+}
+
+// Create (or update) a source added manually by the user via its RSS URL.
+export function createUserSource(s: {
+  id: string;
+  name: string;
+  url: string;
+  homepage: string | null;
+}): void {
+  db()
+    .prepare(
+      `INSERT INTO sources (id, name, url, homepage, category, affiliation, note)
+       VALUES (@id, @name, @url, @homepage, NULL, NULL, NULL)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name, url = excluded.url, homepage = excluded.homepage`
+    )
+    .run(s);
+}
+
 // How many sources the user currently subscribes to (the "Following N" count).
 export function getFollowedCount(): number {
   const row = db()
